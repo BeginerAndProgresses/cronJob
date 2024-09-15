@@ -1,5 +1,5 @@
 //go:generate mockgen -destination=mocks/logger.go -package=gocronmocks . Logger
-package cornJob
+package cron
 
 import (
 	"fmt"
@@ -8,12 +8,11 @@ import (
 	"strings"
 )
 
-// Logger is the interface that wraps the basic logging methods
-// used by gocron. The methods are modeled after the standard
-// library slog package. The default logger is a no-op logger.
-// To enable logging, use one of the provided New*Logger functions
-// or implement your own Logger. The actual level of Log that is logged
-// is handled by the implementation.
+// Logger 是包装 gocron 使用的基本日志记录方法的接口。
+// 这些方法以标准库 slog 包为模型。
+// 默认 Logger 是 no-op Logger。
+// 要启用日志记录，请使用提供的 NewLogger 函数之一或实现您自己的 Logger。
+// 记录的实际 Log 级别由实现处理。
 type Logger interface {
 	Debug(msg string, args ...any)
 	Error(msg string, args ...any)
@@ -49,7 +48,7 @@ type logger struct {
 	level LogLevel
 }
 
-// NewLogger returns a new Logger that logs at the given level.
+// NewLogger 返回一个在给定级别记录的新 Logger。
 func NewLogger(level LogLevel) Logger {
 	l := log.New(os.Stdout, "", log.LstdFlags)
 	return &logger{

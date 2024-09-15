@@ -1,5 +1,5 @@
 //go:generate mockgen -destination=mocks/job.go -package=gocronmocks . Job
-package cornJob
+package cron
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// internalJob stores the information needed by the scheduler
-// to manage scheduling, starting and stopping the job
+// internalJob 存储调度器所需的信息
+// 包括管理调度、启动和停止作业
 type internalJob struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -25,8 +25,8 @@ type internalJob struct {
 	tags   []string
 	jobSchedule
 
-	// as some jobs may queue up, it's possible to
-	// have multiple nextScheduled times
+	//因为有些作业可能会排队，所以可以这样做
+	//有多个 nextScheduled 的时间存在
 	nextScheduled []time.Time
 
 	lastRun            time.Time
@@ -39,7 +39,7 @@ type internalJob struct {
 	startTime          time.Time
 	startImmediately   bool
 	stopTime           time.Time
-	// event listeners
+	// 事件监听器
 	afterJobRuns          func(jobID uuid.UUID, jobName string)
 	beforeJobRuns         func(jobID uuid.UUID, jobName string)
 	afterJobRunsWithError func(jobID uuid.UUID, jobName string, err error)
@@ -49,11 +49,10 @@ type internalJob struct {
 	locker Locker
 }
 
-// stop is used to stop the job's timer and cancel the context
-// stopping the timer is critical for cleaning up jobs that are
-// sleeping in a time.AfterFunc timer when the job is being stopped.
-// cancelling the context keeps the executor from continuing to try
-// and run the job.
+// Stop用于停止作业的定时器并取消上下文。
+// 停止定时器对于清理处于睡眠状态的作业至关重要。
+// 当作业被停止时，AfterFunc定时器。
+// 取消上下文会阻止执行器继续尝试运行作业。
 func (j *internalJob) stop() {
 	if j.timer != nil {
 		j.timer.Stop()
@@ -68,18 +67,16 @@ func (j *internalJob) stopTimeReached(now time.Time) bool {
 	return j.stopTime.Before(now)
 }
 
-// task stores the function and parameters
-// that are actually run when the job is executed.
+// task 存储作业执行时实际运行的函数和参数。
 type task struct {
 	function   any
 	parameters []any
 }
 
-// Task defines a function that returns the task
-// function and parameters.
+// Task defines 返回一个task，包含一个函数和参数
 type Task func() task
 
-// NewTask provides the job's task function and parameters.
+// NewTask 提供作业的任务函数和参数。
 func NewTask(function any, parameters ...any) Task {
 	return func() task {
 		return task{
@@ -89,9 +86,9 @@ func NewTask(function any, parameters ...any) Task {
 	}
 }
 
-// limitRunsTo is used for managing the number of runs
-// when the user only wants the job to run a certain
-// number of times and then be removed from the scheduler.
+// limitRunsTo 用于管理运行次数
+// 当用户只希望作业运行一定的
+// 运行次数，然后从调度程序中删除。
 type limitRunsTo struct {
 	limit    uint
 	runCount uint
@@ -99,12 +96,11 @@ type limitRunsTo struct {
 
 // -----------------------------------------------
 // -----------------------------------------------
-// --------------- Job Variants ------------------
+// --------------- Job 变体 ------------------
 // -----------------------------------------------
 // -----------------------------------------------
 
-// JobDefinition defines the interface that must be
-// implemented to create a job from the definition.
+// JobDefinition 定义了一个必须实现根据定义创建作业的接口。
 type JobDefinition interface {
 	setup(j *internalJob, l *time.Location, now time.Time) error
 }
@@ -121,8 +117,8 @@ func (c cronJobDefinition) setup(j *internalJob, location *time.Location, now ti
 	if strings.HasPrefix(c.crontab, "TZ=") || strings.HasPrefix(c.crontab, "CRON_TZ=") {
 		withLocation = c.crontab
 	} else {
-		// since the user didn't provide a timezone default to the location
-		// passed in by the scheduler. Default: time.Local
+		// 因为用户没有为该位置提供默认时区
+		// 由调度器传入。默认值:time.Location
 		withLocation = fmt.Sprintf("CRON_TZ=%s %s", location.String(), c.crontab)
 	}
 
@@ -148,12 +144,10 @@ func (c cronJobDefinition) setup(j *internalJob, location *time.Location, now ti
 	return nil
 }
 
-// CronJob defines a new job using the crontab syntax: `* * * * *`.
-// An optional 6th field can be used at the beginning if withSeconds
-// is set to true: `* * * * * *`.
-// The timezone can be set on the Scheduler using WithLocation, or in the
-// crontab in the form `TZ=America/Chicago * * * * *` or
-// `CRON_TZ=America/Chicago * * * * *`
+// CronJob 使用crontab语法定义一个新作业:`* * * * *`。
+// 如果withSeconds设置为true，可选的第6个字段可以在开头使用:`* * * * * *`。
+// 时区可以使用WithLocation在Scheduler上设置，也可以在crontab中以' TZ=AmericaChicago * * * * *'
+// 或' CRON_TZ=AmericaChicago * * * * *'的形式设置。
 func CronJob(crontab string, withSeconds bool) JobDefinition {
 	return cronJobDefinition{
 		crontab:     crontab,
@@ -175,8 +169,7 @@ func (d durationJobDefinition) setup(j *internalJob, _ *time.Location, _ time.Ti
 	return nil
 }
 
-// DurationJob defines a new job using time.Duration
-// for the interval.
+// DurationJob 定义一个新的作业使用time.Duration作为间隔时间
 func DurationJob(duration time.Duration) JobDefinition {
 	return durationJobDefinition{
 		duration: duration,
@@ -202,15 +195,15 @@ func (d durationRandomJobDefinition) setup(j *internalJob, _ *time.Location, _ t
 	return nil
 }
 
-// DurationRandomJob defines a new job that runs on a random interval
-// between the min and max duration values provided.
+// DurationRandomJob 定义一个新作业，该作业在所提供的最小和最大持续时间值之间的随机间隔内运行。
+// 在提供的最小和最大持续时间值之间。
 //
-// To achieve a similar behavior as tools that use a splay/jitter technique
-// consider the median value as the baseline and the difference between the
-// max-median or median-min as the splay/jitter.
+// 为了实现与使用延展/抖动技术的工具类似的行为
+// 将中值视为基线，将最大值-中值或中值-最小值之间的差值视为最大值-中值或中值-最小值之间的差值。
+// 最大-中值或中值-最小值之间的差值作为延展/抖动值。
 //
-// For example, if you want a job to run every 5 minutes, but want to add
-// up to 1 min of jitter to the interval, you could use
+// 例如，如果您希望作业每 5 分钟运行一次，但又想增加
+// 最多 1 分钟的抖动，可以使用
 // DurationRandomJob(4*time.Minute, 6*time.Minute)
 func DurationRandomJob(minDuration, maxDuration time.Duration) JobDefinition {
 	return durationRandomJobDefinition{
@@ -219,12 +212,12 @@ func DurationRandomJob(minDuration, maxDuration time.Duration) JobDefinition {
 	}
 }
 
-// DailyJob runs the job on the interval of days, and at the set times.
-// By default, the job will start the next available day, considering the last run to be now,
-// and the time and day based on the interval and times you input. This means, if you
-// select an interval greater than 1, your job by default will run X (interval) days from now
-// if there are no atTimes left in the current day. You can use WithStartAt to tell the
-// scheduler to start the job sooner.
+// DailyJob 在设定的时间间隔内运行作业。
+// 默认情况下，作业将在下一个可用日开始，并将上次运行时间视为现在、
+// 并根据您输入的时间间隔和时间来确定时间和日期。这意味着，如果您
+// 选择的时间间隔大于 1，则作业默认将从现在开始运行 X（时间间隔）天。
+// 如果当前天没有剩余的 atTimes。您可以使用 WithStartAt 告诉
+// 调度程序提前启动作业。
 func DailyJob(interval uint, atTimes AtTimes) JobDefinition {
 	return dailyJobDefinition{
 		interval: interval,
@@ -298,10 +291,10 @@ func (w weeklyJobDefinition) setup(j *internalJob, location *time.Location, _ ti
 	return nil
 }
 
-// Weekdays defines a function that returns a list of week days.
+// Weekdays 定义了一个返回星期列表的函数。
 type Weekdays func() []time.Weekday
 
-// NewWeekdays provide the days of the week the job should run.
+// NewWeekdays 提供作业应该运行的星期几。
 func NewWeekdays(weekday time.Weekday, weekdays ...time.Weekday) Weekdays {
 	return func() []time.Weekday {
 		weekdays = append(weekdays, weekday)
@@ -309,14 +302,14 @@ func NewWeekdays(weekday time.Weekday, weekdays ...time.Weekday) Weekdays {
 	}
 }
 
-// WeeklyJob runs the job on the interval of weeks, on the specific days of the week
-// specified, and at the set times.
+// WeeklyJob 在指定的星期、特定的日期和时间运行作业。
+// 指定的日期和设定的时间运行作业。
 //
-// By default, the job will start the next available day, considering the last run to be now,
-// and the time and day based on the interval, days and times you input. This means, if you
-// select an interval greater than 1, your job by default will run X (interval) weeks from now
-// if there are no daysOfTheWeek left in the current week. You can use WithStartAt to tell the
-// scheduler to start the job sooner.
+// 默认情况下，作业将在下一个可用日开始，并将上次运行时间视为现在、
+// 并根据您输入的时间间隔、天数和时间确定时间和日期。这意味着，如果您
+// 选择的时间间隔大于 1，则作业默认将从现在开始运行 X（时间间隔）周
+// 如果当前周内没有剩余的设定天数。您可以使用 WithStartAt 告诉
+// 调度程序提前启动作业。
 func WeeklyJob(interval uint, daysOfTheWeek Weekdays, atTimes AtTimes) JobDefinition {
 	return weeklyJobDefinition{
 		interval:      interval,
@@ -379,15 +372,15 @@ func (m monthlyJobDefinition) setup(j *internalJob, location *time.Location, _ t
 
 type days []int
 
-// DaysOfTheMonth defines a function that returns a list of days.
+// DaysOfTheMonth 定义一个返回天数列表的函数。
 type DaysOfTheMonth func() days
 
-// NewDaysOfTheMonth provide the days of the month the job should
-// run. The days can be positive 1 to 31 and/or negative -31 to -1.
-// Negative values count backwards from the end of the month.
-// For example: -1 == the last day of the month.
+// NewDaysOfTheMonth 提供了任务在本月应
+// 运行的天数可以是正数 1 至 31 天和/或负数 -31 至 -1 天。
+// 负值从月末开始倒数。
+// 例如：-1 == 本月最后一天。
 //
-//	-5 == 5 days before the end of the month.
+// -5 == 月底前 5 天。
 func NewDaysOfTheMonth(day int, moreDays ...int) DaysOfTheMonth {
 	return func() days {
 		moreDays = append(moreDays, day)
@@ -403,22 +396,20 @@ func (a atTime) time(location *time.Location) time.Time {
 	return time.Date(0, 0, 0, int(a.hours), int(a.minutes), int(a.seconds), 0, location)
 }
 
-// AtTime defines a function that returns the internal atTime
+// AtTime 定义了一个返回内部 atTime 的函数
 type AtTime func() atTime
 
-// NewAtTime provide the hours, minutes and seconds at which
-// the job should be run
+// NewAtTime 提供运行任务的时、分、秒。
 func NewAtTime(hours, minutes, seconds uint) AtTime {
 	return func() atTime {
 		return atTime{hours: hours, minutes: minutes, seconds: seconds}
 	}
 }
 
-// AtTimes define a list of AtTime
+// AtTimes 定义一个 AtTime 的列表
 type AtTimes func() []AtTime
 
-// NewAtTimes provide the hours, minutes and seconds at which
-// the job should be run
+// NewAtTimes 提供运行任务的时、分、秒。
 func NewAtTimes(atTime AtTime, atTimes ...AtTime) AtTimes {
 	return func() []AtTime {
 		atTimes = append(atTimes, atTime)
@@ -426,22 +417,22 @@ func NewAtTimes(atTime AtTime, atTimes ...AtTime) AtTimes {
 	}
 }
 
-// MonthlyJob runs the job on the interval of months, on the specific days of the month
-// specified, and at the set times. Days of the month can be 1 to 31 or negative (-1 to -31), which
-// count backwards from the end of the month. E.g. -1 is the last day of the month.
+// MonthlyJob 以月为间隔，在每月的特定日期运行作业。
+// 指定的日期和时间运行作业。每月的天数可以是 1 到 31 天，也可以是负数（-1 到 -31），从月末开始倒数。
+// 从月底开始倒数。例如，-1 表示每月的最后一天。
 //
-// If a day of the month is selected that does not exist in all months (e.g. 31st)
-// any month that does not have that day will be skipped.
+// 如果选择的月份中的某一天在所有月份中都不存在（例如 31 号）
+// 没有这一天的月份将被跳过。
 //
-// By default, the job will start the next available day, considering the last run to be now,
-// and the time and month based on the interval, days and times you input.
-// This means, if you select an interval greater than 1, your job by default will run
-// X (interval) months from now if there are no daysOfTheMonth left in the current month.
-// You can use WithStartAt to tell the scheduler to start the job sooner.
+// 默认情况下，工作将在下一个可用日期开始，并将上次运行时间视为现在、
+// 并根据您输入的时间间隔、天数和时间来确定时间和月份。
+// 这意味着，如果您选择的时间间隔大于 1，则作业默认将从现在开始运行
+// 如果当前月份没有剩余的月份天数，则作业将从现在开始运行 X（间隔）个月。
+// 您可以使用 WithStartAt 命令调度程序提前启动作业。
 //
-// Carefully consider your configuration!
-//   - For example: an interval of 2 months on the 31st of each month, starting 12/31
-//     would skip Feb, April, June, and next run would be in August.
+// 仔细考虑您的配置！
+// 例如：从 12/31 开始，每月 31 日为 2 个月的时间间隔。
+// 将跳过 2 月、4 月、6 月，下一次运行将在 8 月。
 func MonthlyJob(interval uint, daysOfTheMonth DaysOfTheMonth, atTimes AtTimes) JobDefinition {
 	return monthlyJobDefinition{
 		interval:       interval,
@@ -459,7 +450,7 @@ type oneTimeJobDefinition struct {
 func (o oneTimeJobDefinition) setup(j *internalJob, _ *time.Location, now time.Time) error {
 	sortedTimes := o.startAt(j)
 	slices.SortStableFunc(sortedTimes, ascendingTime)
-	// keep only schedules that are in the future
+	// 只保存将来的日程表
 	idx, found := slices.BinarySearchFunc(sortedTimes, now, ascendingTime)
 	if found {
 		idx++
@@ -472,10 +463,10 @@ func (o oneTimeJobDefinition) setup(j *internalJob, _ *time.Location, now time.T
 	return nil
 }
 
-// OneTimeJobStartAtOption defines when the one time job is run
+// OneTimeJobStartAtOption 定义一次性作业何时运行
 type OneTimeJobStartAtOption func(*internalJob) []time.Time
 
-// OneTimeJobStartImmediately tells the scheduler to run the one time job immediately.
+// OneTimeJobStartImmediately 告诉调度器立即运行一次性作业。
 func OneTimeJobStartImmediately() OneTimeJobStartAtOption {
 	return func(j *internalJob) []time.Time {
 		j.startImmediately = true
@@ -483,24 +474,23 @@ func OneTimeJobStartImmediately() OneTimeJobStartAtOption {
 	}
 }
 
-// OneTimeJobStartDateTime sets the date & time at which the job should run.
-// This datetime must be in the future (according to the scheduler clock).
+// OneTimeJobStartDateTime 设置作业应该运行的日期和时间。
+// 这个日期时间必须在未来(根据调度器的时钟)
 func OneTimeJobStartDateTime(start time.Time) OneTimeJobStartAtOption {
 	return func(_ *internalJob) []time.Time {
 		return []time.Time{start}
 	}
 }
 
-// OneTimeJobStartDateTimes sets the date & times at which the job should run.
-// At least one of the date/times must be in the future (according to the scheduler clock).
+// OneTimeJobStartDateTimes 设置作业运行的日期和时间。
+// 至少有一个日期/时间必须在未来(根据调度器的时钟)
 func OneTimeJobStartDateTimes(times ...time.Time) OneTimeJobStartAtOption {
 	return func(_ *internalJob) []time.Time {
 		return times
 	}
 }
 
-// OneTimeJob is to run a job once at a specified time and not on
-// any regular schedule.
+// OneTimeJob 是在指定时间运行一次作业，而不是按照任何定期计划执行。
 func OneTimeJob(startAt OneTimeJobStartAtOption) JobDefinition {
 	return oneTimeJobDefinition{
 		startAt: startAt,
@@ -509,16 +499,15 @@ func OneTimeJob(startAt OneTimeJobStartAtOption) JobDefinition {
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ----------------- Job Options -----------------
+// ----------------- Job 配置 -----------------
 // -----------------------------------------------
 // -----------------------------------------------
 
-// JobOption defines the constructor for job options.
+// JobOption 定义作业配置的构造函数。
 type JobOption func(*internalJob, time.Time) error
 
-// WithDistributedJobLocker sets the locker to be used by multiple
-// Scheduler instances to ensure that only one instance of each
-// job is run.
+// WithDistributedJobLocker （分布式任务锁定器）将锁定器设置为由多个
+// 调度程序实例使用的锁定器，以确保每个实例同一时间是有一个调度器在允许
 func WithDistributedJobLocker(locker Locker) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		if locker == nil {
@@ -529,8 +518,7 @@ func WithDistributedJobLocker(locker Locker) JobOption {
 	}
 }
 
-// WithEventListeners sets the event listeners that should be
-// run for the job.
+// WithEventListeners 设置应为任务运行的事件监听器。
 func WithEventListeners(eventListeners ...EventListener) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		for _, eventListener := range eventListeners {
@@ -542,8 +530,8 @@ func WithEventListeners(eventListeners ...EventListener) JobOption {
 	}
 }
 
-// WithLimitedRuns limits the number of executions of this job to n.
-// Upon reaching the limit, the job is removed from the scheduler.
+// WithLimitedRuns 将该作业的执行次数限制为 n。
+// 达到限制后，作业将从调度程序中移除。
 func WithLimitedRuns(limit uint) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		j.limitRunsTo = &limitRunsTo{
@@ -554,8 +542,7 @@ func WithLimitedRuns(limit uint) JobOption {
 	}
 }
 
-// WithName sets the name of the job. Name provides
-// a human-readable identifier for the job.
+// WithName 设置任务名称。使得可读性更高。
 func WithName(name string) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		if name == "" {
@@ -566,9 +553,9 @@ func WithName(name string) JobOption {
 	}
 }
 
-// WithSingletonMode keeps the job from running again if it is already running.
-// This is useful for jobs that should not overlap, and that occasionally
-// (but not consistently) run longer than the interval between job runs.
+// WithSingletonMode 使已经运行的作业不再运行。
+// 这对于不应重叠的作业以及偶尔
+// 运行时间超过作业运行间隔时间的作业来说非常有用。
 func WithSingletonMode(mode LimitMode) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		j.singletonMode = true
@@ -577,8 +564,7 @@ func WithSingletonMode(mode LimitMode) JobOption {
 	}
 }
 
-// WithStartAt sets the option for starting the job at
-// a specific datetime.
+// WithStartAt 设置在特定日期启动任务的选项。
 func WithStartAt(option StartAtOption) JobOption {
 	return func(j *internalJob, now time.Time) error {
 		return option(j, now)
@@ -588,9 +574,9 @@ func WithStartAt(option StartAtOption) JobOption {
 // StartAtOption defines options for starting the job
 type StartAtOption func(*internalJob, time.Time) error
 
-// WithStartImmediately tells the scheduler to run the job immediately
-// regardless of the type or schedule of job. After this immediate run
-// the job is scheduled from this time based on the job definition.
+// WithStartImmediately 命令调度程序立即运行作业。
+// 无论作业类型或计划如何。立即运行后
+// 作业将从此时开始根据作业定义进行调度。
 func WithStartImmediately() StartAtOption {
 	return func(j *internalJob, _ time.Time) error {
 		j.startImmediately = true
@@ -598,8 +584,8 @@ func WithStartImmediately() StartAtOption {
 	}
 }
 
-// WithStartDateTime sets the first date & time at which the job should run.
-// This datetime must be in the future.
+// WithStartDateTime 设置任务运行的第一个日期和时间。
+// 这个日期时间必须在未来。
 func WithStartDateTime(start time.Time) StartAtOption {
 	return func(j *internalJob, now time.Time) error {
 		if start.IsZero() || start.Before(now) {
@@ -613,20 +599,19 @@ func WithStartDateTime(start time.Time) StartAtOption {
 	}
 }
 
-// WithStopAt sets the option for stopping the job from running
-// after the specified time.
+// WithStopAt 设置在指定时间后停止运行作业的选项。
 func WithStopAt(option StopAtOption) JobOption {
 	return func(j *internalJob, now time.Time) error {
 		return option(j, now)
 	}
 }
 
-// StopAtOption defines options for stopping the job
+// StopAtOption 定义了停止工作的选项
 type StopAtOption func(*internalJob, time.Time) error
 
-// WithStopDateTime sets the final date & time after which the job should stop.
-// This must be in the future and should be after the startTime (if specified).
-// The job's final run may be at the stop time, but not after.
+// WithStopDateTime 设置作业停止的最终日期和时间。
+// 这必须是未来的日期和时间，并且应在开始时间（如果已指定）之后。
+// 作业的最终运行时间可以是停止时间，但不能在停止时间之后。
 func WithStopDateTime(end time.Time) StopAtOption {
 	return func(j *internalJob, now time.Time) error {
 		if end.IsZero() || end.Before(now) {
@@ -640,9 +625,8 @@ func WithStopDateTime(end time.Time) StopAtOption {
 	}
 }
 
-// WithTags sets the tags for the job. Tags provide
-// a way to identify jobs by a set of tags and remove
-// multiple jobs by tag.
+// WithTags 设置任务的标记。
+// 标签提供了一种通过一组标签识别作业和删除多个任务方式。
 func WithTags(tags ...string) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		j.tags = tags
@@ -650,9 +634,8 @@ func WithTags(tags ...string) JobOption {
 	}
 }
 
-// WithIdentifier sets the identifier for the job. The identifier
-// is used to uniquely identify the job and is used for logging
-// and metrics.
+// WithIdentifier 设置作业的标识符。标识符
+// 用于唯一标识作业并用于记录日志和指标。
 func WithIdentifier(id uuid.UUID) JobOption {
 	return func(j *internalJob, _ time.Time) error {
 		if id == uuid.Nil {
@@ -666,16 +649,16 @@ func WithIdentifier(id uuid.UUID) JobOption {
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ------------- Job Event Listeners -------------
+// ------------- Job 事件监听 -------------
 // -----------------------------------------------
 // -----------------------------------------------
 
-// EventListener defines the constructor for event
-// listeners that can be used to listen for job events.
+// EventListener 定义了事件监听器的构造函数。
+// 事件监听器的构造函数。
 type EventListener func(*internalJob) error
 
-// BeforeJobRuns is used to listen for when a job is about to run and
-// then run the provided function.
+// BeforeJobRuns 用于侦听作业即将运行的时间，然后运行所提供的函数。
+// 然后运行所提供的函数。
 func BeforeJobRuns(eventListenerFunc func(jobID uuid.UUID, jobName string)) EventListener {
 	return func(j *internalJob) error {
 		if eventListenerFunc == nil {
@@ -686,8 +669,8 @@ func BeforeJobRuns(eventListenerFunc func(jobID uuid.UUID, jobName string)) Even
 	}
 }
 
-// AfterJobRuns is used to listen for when a job has run
-// without an error, and then run the provided function.
+// AfterJobRuns 用于监听作业是否已无差错运行，然后运行所提供的函数。
+// 无错误运行，然后运行所提供的函数。
 func AfterJobRuns(eventListenerFunc func(jobID uuid.UUID, jobName string)) EventListener {
 	return func(j *internalJob) error {
 		if eventListenerFunc == nil {
@@ -698,8 +681,8 @@ func AfterJobRuns(eventListenerFunc func(jobID uuid.UUID, jobName string)) Event
 	}
 }
 
-// AfterJobRunsWithError is used to listen for when a job has run and
-// returned an error, and then run the provided function.
+// AfterJobRunsWithError 用于侦听作业是否已运行并
+// 返回错误，然后运行所提供的函数。
 func AfterJobRunsWithError(eventListenerFunc func(jobID uuid.UUID, jobName string, err error)) EventListener {
 	return func(j *internalJob) error {
 		if eventListenerFunc == nil {
@@ -710,8 +693,8 @@ func AfterJobRunsWithError(eventListenerFunc func(jobID uuid.UUID, jobName strin
 	}
 }
 
-// AfterJobRunsWithPanic is used to listen for when a job has run and
-// returned panicked recover data, and then run the provided function.
+// AfterJobRunsWithPanic 用于监听作业运行并
+// 返回panic的恢复数据，然后运行所提供的函数。
 func AfterJobRunsWithPanic(eventListenerFunc func(jobID uuid.UUID, jobName string, recoverData any)) EventListener {
 	return func(j *internalJob) error {
 		if eventListenerFunc == nil {
@@ -722,8 +705,7 @@ func AfterJobRunsWithPanic(eventListenerFunc func(jobID uuid.UUID, jobName strin
 	}
 }
 
-// AfterLockError is used to when the distributed locker returns an error and
-// then run the provided function.
+// AfterLockError 用于当分布式锁返回错误时，运行所提供的函数。
 func AfterLockError(eventListenerFunc func(jobID uuid.UUID, jobName string, err error)) EventListener {
 	return func(j *internalJob) error {
 		if eventListenerFunc == nil {
@@ -736,7 +718,7 @@ func AfterLockError(eventListenerFunc func(jobID uuid.UUID, jobName string, err 
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ---------------- Job Schedules ----------------
+// ---------------- Job 调度表  -------------------
 // -----------------------------------------------
 // -----------------------------------------------
 
@@ -797,18 +779,18 @@ func (d dailyJob) next(lastRun time.Time) time.Time {
 
 func (d dailyJob) nextDay(lastRun time.Time, firstPass bool) time.Time {
 	for _, at := range d.atTimes {
-		// sub the at time hour/min/sec onto the lastScheduledRun's values
-		// to use in checks to see if we've got our next run time
+		// 在 lastScheduledRun 的值中加入时间（小时/分钟/秒）。
+		// 用于检查是否有下一次运行时间
 		atDate := time.Date(lastRun.Year(), lastRun.Month(), lastRun.Day(), at.Hour(), at.Minute(), at.Second(), lastRun.Nanosecond(), lastRun.Location())
 
 		if firstPass && atDate.After(lastRun) {
-			// checking to see if it is after i.e. greater than,
-			// and not greater or equal as our lastScheduledRun day/time
-			// will be in the loop, and we don't want to select it again
+			// 检查它是否在 "大于 "之后、
+			// 而不是大于或等于我们的 lastScheduledRun 日/时间。
+			// 将出现在循环中，我们不想再次选择它
 			return atDate
 		} else if !firstPass && !atDate.Before(lastRun) {
-			// now that we're looking at the next day, it's ok to consider
-			// the same at time that was last run (as lastScheduledRun has been incremented)
+			// 现在我们要看的是第二天，因此可以考虑
+			// 与上次运行时间相同（因为 lastScheduledRun 已递增）
 			return atDate
 		}
 	}
@@ -838,23 +820,23 @@ func (w weeklyJob) next(lastRun time.Time) time.Time {
 
 func (w weeklyJob) nextWeekDayAtTime(lastRun time.Time, firstPass bool) time.Time {
 	for _, wd := range w.daysOfWeek {
-		// checking if we're on the same day or later in the same week
+		// 检查我们是否在同一天或同一星期的晚些时候
 		if wd >= lastRun.Weekday() {
-			// weekDayDiff is used to add the correct amount to the atDate day below
+			// weekDayDiff 用于在下面的 atDate 日添加正确的数额
 			weekDayDiff := wd - lastRun.Weekday()
 			for _, at := range w.atTimes {
-				// sub the at time hour/min/sec onto the lastScheduledRun's values
-				// to use in checks to see if we've got our next run time
+				// 在 lastScheduledRun 的值中加入时间（小时/分钟/秒）。
+				// 用于检查是否有下一次运行时间
 				atDate := time.Date(lastRun.Year(), lastRun.Month(), lastRun.Day()+int(weekDayDiff), at.Hour(), at.Minute(), at.Second(), lastRun.Nanosecond(), lastRun.Location())
 
 				if firstPass && atDate.After(lastRun) {
-					// checking to see if it is after i.e. greater than,
-					// and not greater or equal as our lastScheduledRun day/time
-					// will be in the loop, and we don't want to select it again
+					// 检查它是否在 "大于 "之后、
+					// 而不是大于或等于我们的 lastScheduledRun 日/时间。
+					// 将出现在循环中，我们不想再次选择它
 					return atDate
 				} else if !firstPass && !atDate.Before(lastRun) {
-					// now that we're looking at the next week, it's ok to consider
-					// the same at time that was last run (as lastScheduledRun has been incremented)
+					// 既然我们正在考虑下一周，那么就可以考虑
+					// 与上次运行时间相同（因为 lastScheduledRun 已递增）
 					return atDate
 				}
 			}
@@ -894,8 +876,8 @@ func (m monthlyJob) next(lastRun time.Time) time.Time {
 
 func (m monthlyJob) handleNegativeDays(from time.Time, days, negativeDays []int) []int {
 	var out []int
-	// getting a list of the days from the end of the following month
-	// -1 == the last day of the month
+	// 获取下一个月末的天数列表
+	// -1 == 该月的最后一天
 	firstDayNextMonth := time.Date(from.Year(), from.Month()+1, 1, 0, 0, 0, 0, from.Location())
 	for _, daySub := range negativeDays {
 		day := firstDayNextMonth.AddDate(0, 0, daySub).Day()
@@ -907,28 +889,28 @@ func (m monthlyJob) handleNegativeDays(from time.Time, days, negativeDays []int)
 }
 
 func (m monthlyJob) nextMonthDayAtTime(lastRun time.Time, days []int, firstPass bool) time.Time {
-	// find the next day in the month that should run and then check for an at time
+	// 查找本月中应该运行的下一天，然后检查时间是否正确
 	for _, day := range days {
 		if day >= lastRun.Day() {
 			for _, at := range m.atTimes {
-				// sub the day, and the at time hour/min/sec onto the lastScheduledRun's values
-				// to use in checks to see if we've got our next run time
+				// 将日期和时间（小时/分钟/秒）代入 lastScheduledRun 的值中
+				// 用于检查是否有下一次运行时间
 				atDate := time.Date(lastRun.Year(), lastRun.Month(), day, at.Hour(), at.Minute(), at.Second(), lastRun.Nanosecond(), lastRun.Location())
 
 				if atDate.Month() != lastRun.Month() {
-					// this check handles if we're setting a day not in the current month
-					// e.g. setting day 31 in Feb results in March 2nd
+					// 如果我们设置的日期不在当前月份，则进行此检查处理
+					// 例如，将第 31 天设置为 2 月，结果就是 3 月 2 日
 					continue
 				}
 
 				if firstPass && atDate.After(lastRun) {
-					// checking to see if it is after i.e. greater than,
-					// and not greater or equal as our lastScheduledRun day/time
-					// will be in the loop, and we don't want to select it again
+					// 检查它是否在 "大于 "之后、
+					// 而不是大于或等于我们的 lastScheduledRun 日/时间。
+					// 将出现在循环中，我们不想再次选择它
 					return atDate
 				} else if !firstPass && !atDate.Before(lastRun) {
-					// now that we're looking at the next month, it's ok to consider
-					// the same at time that was  lastScheduledRun (as lastScheduledRun has been incremented)
+					// 现在我们要看下个月的情况，因此可以考虑
+					// 与上次计划运行的时间相同（因为上次计划运行的时间已递增）
 					return atDate
 				}
 			}
@@ -944,24 +926,24 @@ type oneTimeJob struct {
 	sortedTimes []time.Time
 }
 
-// next finds the next item in a sorted list of times using binary-search.
+// next 使用二元搜索，在时间排序列表中查找下一个项目。
 //
-// example: sortedTimes: [2, 4, 6, 8]
+// example: sortedTimes：[2, 4, 6, 8]
 //
 // lastRun: 1 => [idx=0,found=false] => next is 2 - sorted[idx] idx=0
-// lastRun: 2 => [idx=0,found=true] => next is 4 - sorted[idx+1] idx=1
-// lastRun: 3 => [idx=1,found=false] => next is 4 - sorted[idx] idx=1
-// lastRun: 4 => [idx=1,found=true] => next is 6 - sorted[idx+1] idx=2
-// lastRun: 7 => [idx=3,found=false] => next is 8 - sorted[idx] idx=3
-// lastRun: 8 => [idx=3,found=found] => next is none
-// lastRun: 9 => [idx=3,found=found] => next is none
+// lastRun: 2 => [idx=0,found=true] => 下一个是 4 - 排序[idx+1] idx=1
+// lastRun: 3 => [idx=1,found=false] => 下一个是 4 - 排序[idx] idx=1
+// lastRun: 4 => [idx=1,found=true] => 下一个是 6 - 排序[idx+1] idx=2
+// lastRun: 7 => [idx=3,found=false] => 下一个是 8 - 排序[idx] idx=3
+// lastRun: 8 => [idx=3,found=found] => 下一个是无
+// lastRun: 9 => [idx=3,found=found] => 下一个是无
 func (o oneTimeJob) next(lastRun time.Time) time.Time {
 	idx, found := slices.BinarySearchFunc(o.sortedTimes, lastRun, ascendingTime)
-	// if found, the next run is the following index
+	// 如果找到，下一次运行将是以下索引
 	if found {
 		idx++
 	}
-	// exhausted runs
+	// 耗尽运行时间
 	if idx >= len(o.sortedTimes) {
 		return time.Time{}
 	}
@@ -971,39 +953,36 @@ func (o oneTimeJob) next(lastRun time.Time) time.Time {
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ---------------- Job Interface ----------------
+// ---------------- Job 接口 ----------------
 // -----------------------------------------------
 // -----------------------------------------------
 
-// Job provides the available methods on the job
-// available to the caller.
+// Job 提供工作的可用方法
+// 可供调用者使用。
 type Job interface {
-	// ID returns the job's unique identifier.
+	// ID 返回Id的唯一标识符
 	ID() uuid.UUID
-	// LastRun returns the time of the job's last run
+	// LastRun 返回上次运行时间
 	LastRun() (time.Time, error)
-	// Name returns the name defined on the job.
+	// Name 返回在作业上定义的名称。
 	Name() string
-	// NextRun returns the time of the job's next scheduled run.
+	// NextRun 返回下一次调度运行时间
 	NextRun() (time.Time, error)
-	// NextRuns returns the requested number of calculated next run values.
+	// NextRuns 返回接下来的 N 次运行时间，如果调度表中不存在第m个运行时间，则根据第m-1个运算时间动态生成
 	NextRuns(int) ([]time.Time, error)
-	// RunNow runs the job once, now. This does not alter
-	// the existing run schedule, and will respect all job
-	// and scheduler limits. This means that running a job now may
-	// cause the job's regular interval to be rescheduled due to
-	// the instance being run by RunNow blocking your run limit.
+	// RunNow 现在运行一次作业。
+	// 这不会改变现有的运行时间表，并尊重所有作业和调度器的限制。
+	// 这意味着现在运行作业可能会导致作业的常规间隔被重新安排，
+	// 因为RunNow运行的实例阻塞了您的运行限制。
 	RunNow() error
-	// Tags returns the job's string tags.
+	// Tags 返回工作的string类型的标签列表。
 	Tags() []string
 }
 
 var _ Job = (*job)(nil)
 
-// job is the internal struct that implements
-// the public interface. This is used to avoid
-// leaking information the caller never needs
-// to have or tinker with.
+// job 是实现的内部结构
+// 公共接口。这是用来避免泄露调用者永远不需要持有和考虑的信息
 type job struct {
 	id            uuid.UUID
 	name          string

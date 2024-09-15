@@ -1,5 +1,5 @@
 //go:generate mockgen -destination=mocks/scheduler.go -package=gocronmocks . Scheduler
-package cornJob
+package cron
 
 import (
 	"context"
@@ -14,85 +14,81 @@ import (
 
 var _ Scheduler = (*scheduler)(nil)
 
-// Scheduler defines the interface for the Scheduler.
+// Scheduler 定义 Scheduler 的接口。
 type Scheduler interface {
-	// Jobs returns all the jobs currently in the scheduler.
+	// Jobs 返回当前在调度程序中的所有作业。
 	Jobs() []Job
-	// NewJob creates a new job in the Scheduler. The job is scheduled per the provided
-	// definition when the Scheduler is started. If the Scheduler is already running
-	// the job will be scheduled when the Scheduler is started.
+	// NewJob 在调度器中创建一个新作业。
+	// 在启动调度器时，根据提供的定义调度作业。
+	// 如果调度器已经在运行，作业将在调度器启动时被调度。
 	NewJob(JobDefinition, Task, ...JobOption) (Job, error)
-	// RemoveByTags removes all jobs that have at least one of the provided tags.
+	// RemoveByTags 删除所有具有提供的标签的作业。
 	RemoveByTags(...string)
-	// RemoveJob removes the job with the provided id.
+	// RemoveJob 删除指定 ID 的作业。
 	RemoveJob(uuid.UUID) error
-	// Shutdown should be called when you no longer need
-	// the Scheduler or Job's as the Scheduler cannot
-	// be restarted after calling Shutdown. This is similar
-	// to a Close or Cleanup method and is often deferred after
-	// starting the scheduler.
+	// Shutdown 应该在您不再需要调度器或作业时调用，
+	// 因为在调用Shutdown后无法重新启动调度器。
+	// 这类似于关闭或清理方法，通常在启动调度器后延迟执行。
 	Shutdown() error
-	// Start begins scheduling jobs for execution based
-	// on each job's definition. Job's added to an already
-	// running scheduler will be scheduled immediately based
-	// on definition. Start is non-blocking.
+	// Start 开始根据每个作业的定义来调度作业执行。
+	// 作业添加到已经运行的调度器将立即根据定义进行调度。
+	// 开始是非阻塞的。
 	Start()
-	// StopJobs stops the execution of all jobs in the scheduler.
-	// This can be useful in situations where jobs need to be
-	// paused globally and then restarted with Start().
+	// StopJobs 停止调度器中所有作业的执行。
+	// 在需要全局暂停作业，然后用Start()重新启动作业的情况下，将会很有用。
 	StopJobs() error
-	// Update replaces the existing Job's JobDefinition with the provided
-	// JobDefinition. The Job's Job.ID() remains the same.
+	// Update 根据一个作业的唯一标识符，将 JobDefinition 更新，并更新Task，
+	// 原本task不会保留，更新后工作的唯一标识符不变。
 	Update(uuid.UUID, JobDefinition, Task, ...JobOption) (Job, error)
-	// JobsWaitingInQueue number of jobs waiting in Queue in case of LimitModeWait
-	// In case of LimitModeReschedule or no limit it will be always zero
+	// JobsWaitingInQueue 队列中等待的作业数，在LimitModeWait情况下，
+	// 在 limitmoderes schedule 情况下，或者没有限制时，它总是0
 	JobsWaitingInQueue() int
 }
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ----------------- Scheduler -------------------
+// ------------------- 调度器 ---------------------
 // -----------------------------------------------
 // -----------------------------------------------
 
 type scheduler struct {
-	// context used for shutting down
+	// 用于关闭的上下文
 	shutdownCtx context.Context
-	// cancel used to signal scheduler should shut down
+	// cancel 用于向 Scheduler 发出 SWITCH DOWN 信号
 	shutdownCancel context.CancelFunc
-	// the executor, which actually runs the jobs sent to it via the scheduler
+	// 执行器，实际运行通过调度器发送给它的作业
 	exec executor
-	// the map of jobs registered in the scheduler
+	// 在调度器中注册的作业的映射
 	jobs map[uuid.UUID]internalJob
-	// the location used by the scheduler for scheduling when relevant
+	// location 被用于与时间相关的所有调度操作的调度中
 	location *time.Location
-	// whether the scheduler has been started or not
+	// 调度器是否被启动
 	started bool
-	// globally applied JobOption's set on all jobs added to the scheduler
-	// note: individually set JobOption's take precedence.
+	// 在添加到调度程序的所有作业上全局应用JobOption设置
+	// 注意:单独设置的JobOption优先。
 	globalJobOptions []JobOption
-	// the scheduler's logger
+	// logger
 	logger Logger
 
-	// used to tell the scheduler to start
+	// 作为一个信号，告诉调度器开始
 	startCh chan struct{}
-	// used to report that the scheduler has started
+	// 用于报告调度程序已启动
 	startedCh chan struct{}
-	// used to tell the scheduler to stop
+	// 作为一个信号，告诉调度器停止
 	stopCh chan struct{}
-	// used to report that the scheduler has stopped
+	// 用于报告调度程序停止
 	stopErrCh chan error
-	// used to send all the jobs out when a request is made by the client
+	// 用于在客户端发出请求时发送所有作业
 	allJobsOutRequest chan allJobsOutRequest
-	// used to send a jobs out when a request is made by the client
+	// 用于在客户端发出请求时发送作业
 	jobOutRequestCh chan jobOutRequest
-	// used to run a job on-demand when requested by the client
+	// 用于在客户端请求时按需运行作业
 	runJobRequestCh chan runJobRequest
-	// new jobs are received here
+	// 在这里接收新工作
 	newJobCh chan newJobIn
-	// requests from the client to remove jobs by ID are received here
+	// 在此处接收来自客户端的按 ID 删除作业的请求
 	removeJobCh chan uuid.UUID
-	// requests from the client to remove jobs by tags are received here
+	// 此处收到客户通过标签删除作业的请求
 	removeJobsByTagsCh chan []string
 }
 
@@ -116,11 +112,11 @@ type allJobsOutRequest struct {
 	outChan chan []Job
 }
 
-// NewScheduler creates a new Scheduler instance.
-// The Scheduler is not started until Start() is called.
+// NewScheduler 创建一个新的调度器实例.
+// 这个调度器是未启动状态，直到 Start() 被调用
 //
-// NewJob will add jobs to the Scheduler, but they will not
-// be scheduled until Start() is called.
+// NewJob 会将作业添加到 Scheduler 中，但它们不会被调度
+// 直到到调用 Start（） 为止。
 func NewScheduler(options ...SchedulerOption) (Scheduler, error) {
 	schCtx, cancel := context.WithCancel(context.Background())
 
@@ -166,7 +162,7 @@ func NewScheduler(options ...SchedulerOption) (Scheduler, error) {
 	}
 
 	go func() {
-		s.logger.Info("gocron: new scheduler created")
+		s.logger.Info("gocron: 新的调度器已经创建")
 		for {
 			select {
 			case id := <-s.exec.jobsOutForRescheduling:
@@ -214,15 +210,12 @@ func NewScheduler(options ...SchedulerOption) (Scheduler, error) {
 
 // -----------------------------------------------
 // -----------------------------------------------
-// --------- Scheduler Channel Methods -----------
+// ------------ Scheduler 管道方法 ----------------
 // -----------------------------------------------
 // -----------------------------------------------
 
-// The scheduler's channel functions are broken out here
-// to allow prioritizing within the select blocks. The idea
-// being that we want to make sure that scheduling tasks
-// are not blocked by requests from the caller for information
-// about jobs.
+// 调度器的channel函数在这里被分解，允许在select块内进行优先级排序。
+// 我们的想法是确保调度任务不会被调用者请求有关作业的信息所阻塞。
 
 func (s *scheduler) stopScheduler() {
 	s.logger.Debug("gocron: stopping scheduler")
@@ -310,8 +303,7 @@ func (s *scheduler) selectRemoveJob(id uuid.UUID) {
 	delete(s.jobs, id)
 }
 
-// Jobs coming back from the executor to the scheduler that
-// need to be evaluated for rescheduling.
+// 从执行器返回到调度程序的作业需要评估重新安排。
 func (s *scheduler) selectExecJobsOutForRescheduling(id uuid.UUID) {
 	select {
 	case <-s.shutdownCtx.Done():
@@ -331,9 +323,7 @@ func (s *scheduler) selectExecJobsOutForRescheduling(id uuid.UUID) {
 
 	scheduleFrom := j.lastRun
 	if len(j.nextScheduled) > 0 {
-		// always grab the last element in the slice as that is the furthest
-		// out in the future and the time from which we want to calculate
-		// the subsequent next run time.
+		// 总是获取切片中的最后一个元素，因为它是未来最远的，以及我们希望计算后续下一次运行时的时间。
 		slices.SortStableFunc(j.nextScheduled, ascendingTime)
 		scheduleFrom = j.nextScheduled[len(j.nextScheduled)-1]
 	}
@@ -350,20 +340,16 @@ func (s *scheduler) selectExecJobsOutForRescheduling(id uuid.UUID) {
 	}
 
 	if next.Before(s.now()) {
-		// in some cases the next run time can be in the past, for example:
-		// - the time on the machine was incorrect and has been synced with ntp
-		// - the machine went to sleep, and woke up some time later
-		// in those cases, we want to increment to the next run in the future
-		// and schedule the job for that time.
+		// 在某些情况下，下一次运行时间可能是过去的时间，
+		// 例如:机器上的时间不正确，并已与NTP同步—机器进入睡眠，并在一段时间后醒来
+		// 在这种情况下，我们希望增加到未来的下一次运行，并为该时间安排任务。
 		for next.Before(s.now()) {
 			next = j.next(next)
 		}
 	}
 	j.nextScheduled = append(j.nextScheduled, next)
 	j.timer = s.exec.clock.AfterFunc(next.Sub(s.now()), func() {
-		// set the actual timer on the job here and listen for
-		// shut down events so that the job doesn't attempt to
-		// run if the scheduler has been shutdown.
+		// 在这里设置作业的实际定时器，监听shutdown事件，这样当调度器关闭时，作业就不会尝试运行。
 		select {
 		case <-s.shutdownCtx.Done():
 			return
@@ -373,7 +359,7 @@ func (s *scheduler) selectExecJobsOutForRescheduling(id uuid.UUID) {
 		}:
 		}
 	})
-	// update the job with its new next and last run times and timer.
+	// 更新作业下一次运行时间和最后一次运行时间
 	s.jobs[id] = j
 }
 
@@ -383,8 +369,7 @@ func (s *scheduler) selectExecJobsOutCompleted(id uuid.UUID) {
 		return
 	}
 
-	// if the job has nextScheduled time in the past,
-	// we need to remove any that are in the past.
+	// 如果作业的下一个计划时间是在过去，我们需要删除所有在过去的时间。
 	var newNextScheduled []time.Time
 	for _, t := range j.nextScheduled {
 		if t.Before(s.now()) {
@@ -394,9 +379,8 @@ func (s *scheduler) selectExecJobsOutCompleted(id uuid.UUID) {
 	}
 	j.nextScheduled = newNextScheduled
 
-	// if the job has a limited number of runs set, we need to
-	// check how many runs have occurred and stop running this
-	// job if it has reached the limit.
+	// 如果作业设置了有限的运行次数，
+	// 我们需要检查已经运行了多少次，并在达到限制时停止运行该作业。
 	if j.limitRunsTo != nil {
 		j.limitRunsTo.runCount = j.limitRunsTo.runCount + 1
 		if j.limitRunsTo.runCount == j.limitRunsTo.limit {
@@ -475,7 +459,7 @@ func (s *scheduler) selectRemoveJobsByTags(tags []string) {
 }
 
 func (s *scheduler) selectStart() {
-	s.logger.Debug("gocron: scheduler starting")
+	s.logger.Debug("gocron: 调度器启动")
 	go s.exec.start()
 
 	s.started = true
@@ -513,13 +497,13 @@ func (s *scheduler) selectStart() {
 	select {
 	case <-s.shutdownCtx.Done():
 	case s.startedCh <- struct{}{}:
-		s.logger.Info("gocron: scheduler started")
+		s.logger.Info("gocron: 调度器已启动")
 	}
 }
 
 // -----------------------------------------------
 // -----------------------------------------------
-// ------------- Scheduler Methods ---------------
+// ------------- Scheduler 方法 ---------------
 // -----------------------------------------------
 // -----------------------------------------------
 
@@ -663,14 +647,14 @@ func (s *scheduler) addOrUpdateJob(id uuid.UUID, definition JobDefinition, taskW
 	j.function = tsk.function
 	j.parameters = tsk.parameters
 
-	// apply global job options
+	// 应用全局选项
 	for _, option := range s.globalJobOptions {
 		if err := option(&j, s.now()); err != nil {
 			return nil, err
 		}
 	}
 
-	// apply job specific options, which take precedence
+	// 应用工作特定选项，这些选项优先
 	for _, option := range options {
 		if err := option(&j, s.now()); err != nil {
 			return nil, err
@@ -769,12 +753,11 @@ func (s *scheduler) JobsWaitingInQueue() int {
 // -----------------------------------------------
 // -----------------------------------------------
 
-// SchedulerOption defines the function for setting
-// options on the Scheduler.
+// SchedulerOption 定义在 Scheduler 上设置选项的函数。
 type SchedulerOption func(*scheduler) error
 
-// WithClock sets the clock used by the Scheduler
-// to the clock provided. See https://github.com/jonboulle/clockwork
+// WithClock 将 Scheduler 使用的 clock 设置为所提供的 clock
+// 更多信息看 https://github.com/jonboulle/clockwork
 func WithClock(clock clockwork.Clock) SchedulerOption {
 	return func(s *scheduler) error {
 		if clock == nil {
@@ -785,10 +768,8 @@ func WithClock(clock clockwork.Clock) SchedulerOption {
 	}
 }
 
-// WithDistributedElector sets the elector to be used by multiple
-// Scheduler instances to determine who should be the leader.
-// Only the leader runs jobs, while non-leaders wait and continue
-// to check if a new leader has been elected.
+// WithDistributedElector WithDistributedElector 设置多个 Scheduler 实例要使用的 elector，
+// 以确定谁应该成为领导者。只有领导者运行作业，而非领导者等待并继续检查是否已选出新的领导者。
 func WithDistributedElector(elector Elector) SchedulerOption {
 	return func(s *scheduler) error {
 		if elector == nil {
@@ -799,9 +780,8 @@ func WithDistributedElector(elector Elector) SchedulerOption {
 	}
 }
 
-// WithDistributedLocker sets the locker to be used by multiple
-// Scheduler instances to ensure that only one instance of each
-// job is run.
+// WithDistributedLocker 设置多个 Locker
+// Scheduler 来确保每个作业只运行一个实例。
 func WithDistributedLocker(locker Locker) SchedulerOption {
 	return func(s *scheduler) error {
 		if locker == nil {
@@ -812,9 +792,8 @@ func WithDistributedLocker(locker Locker) SchedulerOption {
 	}
 }
 
-// WithGlobalJobOptions sets JobOption's that will be applied to
-// all jobs added to the scheduler. JobOption's set on the job
-// itself will override if the same JobOption is set globally.
+// WithGlobalJobOptions 设置 JobOption，该选项将应用于添加到调度程序的所有作业。
+// 如果全局设置了相同的 JobOption，则在作业本身上设置的 JobOption 将被覆盖。
 func WithGlobalJobOptions(jobOptions ...JobOption) SchedulerOption {
 	return func(s *scheduler) error {
 		s.globalJobOptions = jobOptions
@@ -822,29 +801,20 @@ func WithGlobalJobOptions(jobOptions ...JobOption) SchedulerOption {
 	}
 }
 
-// LimitMode defines the modes used for handling jobs that reach
-// the limit provided in WithLimitConcurrentJobs
+// LimitMode 定义用于处理达到 WithLimitConcurrentJobs 中提供的限制
 type LimitMode int
 
 const (
-	// LimitModeReschedule causes jobs reaching the limit set in
-	// WithLimitConcurrentJobs or WithSingletonMode to be skipped
-	// and rescheduled for the next run time rather than being
-	// queued up to wait.
+	// LimitModeReschedule 会导致跳过达到 WithLimitConcurrentJobs
+	// 或 WithSingletonMode 中设置的限制的作业，并将其重新安排在下一次运行时运行，而不是排队等待。
 	LimitModeReschedule = 1
 
-	// LimitModeWait causes jobs reaching the limit set in
-	// WithLimitConcurrentJobs or WithSingletonMode to wait
-	// in a queue until a slot becomes available to run.
-	//
-	// Note: this mode can produce unpredictable results as
-	// job execution order isn't guaranteed. For example, a job that
-	// executes frequently may pile up in the wait queue and be executed
-	// many times back to back when the queue opens.
-	//
-	// Warning: do not use this mode if your jobs will continue to stack
-	// up beyond the ability of the limit workers to keep up. An example of
-	// what NOT to do:
+	// LimitModeWait 导致作业到达WithLimitConcurrentJobs或WithSingletonMode设置的限制，
+	// 在队列中等待，直到有可用的任务槽可以运行。
+	// 注意:这种模式可能会产生不可预测的结果，因为作业的执行顺序无法保证。
+	// 例如，一个频繁执行的作业可能会堆积在等待队列中，在队列打开时被往后拖延很多次后执行。
+	// 警告:如果你的作业会持续堆积，超出极限worker的能力，请不要使用这种模式。
+	// 一个不能使用的例子:
 	//
 	//     s, _ := gocron.NewScheduler(gocron.WithLimitConcurrentJobs)
 	//     s.NewJob(
@@ -860,17 +830,13 @@ const (
 	LimitModeWait = 2
 )
 
-// WithLimitConcurrentJobs sets the limit and mode to be used by the
-// Scheduler for limiting the number of jobs that may be running at
-// a given time.
+// WithLimitConcurrentJobs 设置调度器用于限制在给定时间内可能运行的作业数量的限制和模式。
 //
-// Note: the limit mode selected for WithLimitConcurrentJobs takes initial
-// precedence in the event you are also running a limit mode at the job level
-// using WithSingletonMode.
+// 注意:如果您同时使用WithSingletonMode在作业级别运行限制模式，
+// 则WithLimitConcurrentJobs选择的限制模式具有初始优先级。
 //
-// Warning: a single time consuming job can dominate your limit in the event
-// you are running both the scheduler limit WithLimitConcurrentJobs(1, LimitModeWait)
-// and a job limit WithSingletonMode(LimitModeReschedule).
+// 警告:当你同时运行limitconcurrentjobs (1, LimitModeWait)的调度器限制
+// 和singletonmode (limitmoderesschedule)的作业限制时，单个耗时的作业可能会支配你的限制。
 func WithLimitConcurrentJobs(limit uint, mode LimitMode) SchedulerOption {
 	return func(s *scheduler) error {
 		if limit == 0 {
@@ -889,8 +855,7 @@ func WithLimitConcurrentJobs(limit uint, mode LimitMode) SchedulerOption {
 	}
 }
 
-// WithLocation sets the location (i.e. timezone) that the scheduler
-// should operate within. In many systems time.Local is UTC.
+// WithLocation 设置调度器应该操作的位置(即时区)。在许多系统时间。Local是UTC。
 // Default: time.Local
 func WithLocation(location *time.Location) SchedulerOption {
 	return func(s *scheduler) error {
@@ -902,7 +867,7 @@ func WithLocation(location *time.Location) SchedulerOption {
 	}
 }
 
-// WithLogger sets the logger to be used by the Scheduler.
+// WithLogger 设置调度器使用的logger。
 func WithLogger(logger Logger) SchedulerOption {
 	return func(s *scheduler) error {
 		if logger == nil {
@@ -914,9 +879,8 @@ func WithLogger(logger Logger) SchedulerOption {
 	}
 }
 
-// WithStopTimeout sets the amount of time the Scheduler should
-// wait gracefully for jobs to complete before returning when
-// StopJobs() or Shutdown() are called.
+// WithStopTimeout 设置当调用StopJobs()或Shutdown()时，
+// 调度器应该优雅地等待作业完成的时间，然后返回。
 // Default: 10 * time.Second
 func WithStopTimeout(timeout time.Duration) SchedulerOption {
 	return func(s *scheduler) error {
@@ -928,7 +892,7 @@ func WithStopTimeout(timeout time.Duration) SchedulerOption {
 	}
 }
 
-// WithMonitor sets the metrics provider to be used by the Scheduler.
+// WithMonitor 设置 Scheduler 要使用的指标提供程序。
 func WithMonitor(monitor Monitor) SchedulerOption {
 	return func(s *scheduler) error {
 		if monitor == nil {

@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/BeginerAndProgresses/cronJob/cron"
 	"log"
 	"time"
-
-	"github.com/BeginerAndProgresses/cornJob"
 )
 
-var _ cornJob.Elector = (*myElector)(nil)
+var _ cron.Elector = (*myElector)(nil)
 
 type myElector struct {
 	num    int
@@ -37,8 +36,8 @@ func main() {
 				elector.leader = true
 			}
 
-			scheduler, err := cornJob.NewScheduler(
-				cornJob.WithDistributedElector(elector),
+			scheduler, err := cron.NewScheduler(
+				cron.WithDistributedElector(elector),
 			)
 			if err != nil {
 				log.Println(err)
@@ -46,8 +45,8 @@ func main() {
 			}
 
 			_, err = scheduler.NewJob(
-				cornJob.DurationJob(time.Second),
-				cornJob.NewTask(func() {
+				cron.DurationJob(time.Second),
+				cron.NewTask(func() {
 					log.Println("run job")
 				}),
 			)
