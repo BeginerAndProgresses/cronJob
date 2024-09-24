@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/BeginerAndProgresses/cronJob/cron"
+	"github.com/BeginerAndProgresses/cronJob/cron/scheduler"
 	"log"
 	"time"
 )
@@ -36,8 +37,8 @@ func main() {
 				elector.leader = true
 			}
 
-			scheduler, err := cron.NewScheduler(
-				cron.WithDistributedElector(elector),
+			scheduler, err := scheduler.NewScheduler(
+				scheduler.WithDistributedElector(elector),
 			)
 			if err != nil {
 				log.Println(err)
