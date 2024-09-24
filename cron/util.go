@@ -38,17 +38,17 @@ func callJobFuncWithParams(jobFunc any, params ...any) error {
 }
 
 // requestJob 请求一个job
-func requestJob(id uuid.UUID, ch chan scheduler.jobOutRequest) *internalJob {
+func requestJob(id uuid.UUID, ch chan jobOutRequest) *internalJob {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	return requestJobCtx(ctx, id, ch)
 }
 
 // 函数返回一个指向 internalJob 的指针，如果成功获取到任务，它会返回该任务，否则（例如任务取消或超时）返回 nil
-func requestJobCtx(ctx context.Context, id uuid.UUID, ch chan scheduler.jobOutRequest) *internalJob {
+func requestJobCtx(ctx context.Context, id uuid.UUID, ch chan jobOutRequest) *internalJob {
 	resp := make(chan internalJob, 1)
 	select {
-	case ch <- scheduler.jobOutRequest{
+	case ch <- jobOutRequest{
 		id:      id,
 		outChan: resp,
 	}:
